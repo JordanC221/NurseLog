@@ -131,7 +131,7 @@ export default function StudyFlashcards() {
     );
   }
 
-  if (!queue) return <CenteredState loading />;
+  if (!queue || !current) return <CenteredState loading />;
 
   if (done) {
     const accuracy = formatAccuracy(stats.correct, stats.reviewed);

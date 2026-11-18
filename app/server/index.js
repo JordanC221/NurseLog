@@ -7,11 +7,10 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import Stripe from 'stripe';
 import { authenticator } from 'otplib';
-import { PDFParse } from 'pdf-parse';
+import { extractMaterialText as extractUploadedMaterialText } from './material-extraction.js';
 import { db } from './db.js';
 import './migrate.js';
 
@@ -149,13 +148,14 @@ app.post('/api/auth/verify-email', (req, res) => {
 app.post('/api/auth/resend-verification', (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const user = db.prepare('SELECT * FROM users WHERE email=?').get(email);
+  let token = null;
   if (user && !user.email_verified) {
     db.prepare("DELETE FROM verification_tokens WHERE user_id=? AND purpose='verify'").run(user.id);
-    const token = id('verify_');
+    token = id('verify_');
     db.prepare("INSERT INTO verification_tokens(token,user_id,expires_at,purpose) VALUES(?,?,datetime('now','+24 hours'),'verify')").run(token, user.id);
     if (!production) console.log(`[development] verification token for ${email}: ${token}`);
   }
-  res.json({ success: true });
+  res.json({ success: true, ...(!production && token ? { development_verification_token: token } : {}) });
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -420,108 +420,13 @@ app.get('/api/files/:fileId', requireUser, (req, res) => {
   res.sendFile(fullPath);
 });
 
-function u16(buf, offset) {
-  return buf.readUInt16LE(offset);
-}
-
-function u32(buf, offset) {
-  return buf.readUInt32LE(offset);
-}
-
-function readOfficeZipEntries(buffer, match) {
-  let eocd = -1;
-  const min = Math.max(0, buffer.length - 66000);
-  for (let i = buffer.length - 22; i >= min; i--) {
-    if (buffer[i] === 0x50 && buffer[i + 1] === 0x4b && buffer[i + 2] === 0x05 && buffer[i + 3] === 0x06) {
-      eocd = i;
-      break;
-    }
-  }
-  if (eocd < 0) return [];
-
-  const count = u16(buffer, eocd + 10);
-  let position = u32(buffer, eocd + 16);
-  const entries = [];
-  for (let i = 0; i < count && position + 46 <= buffer.length; i++) {
-    if (u32(buffer, position) !== 0x02014b50) break;
-    const method = u16(buffer, position + 10);
-    const compressedSize = u32(buffer, position + 20);
-    const nameLength = u16(buffer, position + 28);
-    const extraLength = u16(buffer, position + 30);
-    const commentLength = u16(buffer, position + 32);
-    const localOffset = u32(buffer, position + 42);
-    const name = buffer.subarray(position + 46, position + 46 + nameLength).toString('utf8');
-    if (match(name) && localOffset + 30 <= buffer.length) {
-      const localNameLength = u16(buffer, localOffset + 26);
-      const localExtraLength = u16(buffer, localOffset + 28);
-      const dataStart = localOffset + 30 + localNameLength + localExtraLength;
-      const compressed = buffer.subarray(dataStart, dataStart + compressedSize);
-      try {
-        const content = method === 0 ? compressed : zlib.inflateRawSync(compressed);
-        entries.push({ name, content: content.toString('utf8') });
-      } catch {
-        entries.push({ name, content: '' });
-      }
-    }
-    position += 46 + nameLength + extraLength + commentLength;
-  }
-  return entries;
-}
-
-function xmlToText(xml) {
-  return String(xml || '')
-    .replace(/<a:br[^>]*\/>/g, ' ')
-    .replace(/<\/a:p>|<\/w:p>/g, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/\n{2,}/g, '\n')
-    .trim();
-}
-
-async function extractMaterialText(file, userId) {
+async function extractMaterialForUser(file, userId) {
   const row = db.prepare('SELECT * FROM files WHERE id=? AND user_id=?').get(file.id, userId);
   if (!row) throw Object.assign(new Error('That file could not be opened. Please upload it again.'), { status: 400 });
   const fullPath = path.join(storageDir, row.storage_key);
   if (!fs.existsSync(fullPath)) throw Object.assign(new Error('That stored file is missing. Please upload it again.'), { status: 400 });
   const buffer = fs.readFileSync(fullPath);
-  const name = String(file.file_name || row.original_name || '').toLowerCase();
-  const ext = name.includes('.') ? name.split('.').pop() : '';
-
-  if (['txt', 'md', 'csv'].includes(ext)) {
-    return buffer.toString('utf8').slice(0, 40000);
-  }
-  if (ext === 'docx') {
-    const entries = readOfficeZipEntries(buffer, (entryName) => entryName === 'word/document.xml');
-    return entries.map((entry) => xmlToText(entry.content)).join('\n\n').slice(0, 40000);
-  }
-  if (ext === 'pptx') {
-    const entries = readOfficeZipEntries(buffer, (entryName) => /^ppt\/slides\/slide\d+\.xml$/.test(entryName));
-    entries.sort((a, b) => {
-      const aNumber = Number(a.name.match(/slide(\d+)\.xml$/)?.[1] || 0);
-      const bNumber = Number(b.name.match(/slide(\d+)\.xml$/)?.[1] || 0);
-      return aNumber - bNumber;
-    });
-    return entries.map((entry, index) => `Slide ${index + 1}: ${xmlToText(entry.content)}`).join('\n\n').slice(0, 40000);
-  }
-  if (ext === 'pdf') {
-    const parser = new PDFParse({ data: buffer });
-    try {
-      const result = await parser.getText();
-      return String(result.text || '').slice(0, 40000);
-    } finally {
-      await parser.destroy();
-    }
-  }
-  if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
-    throw Object.assign(new Error('Photo text extraction is not supported in this independent version. Upload a PDF, Word document, PowerPoint, or text file instead.'), { status: 422 });
-  }
-  throw Object.assign(new Error('Unsupported file type.'), { status: 400 });
+  return extractUploadedMaterialText(buffer, file.file_name || row.original_name);
 }
 
 function remainingGenerationLimit(userId) {
@@ -570,7 +475,7 @@ app.post('/api/functions/generateStudySet', requireUser, async (req, res) => {
     const match = /^\/api\/files\/([^/?]+)$/.exec(fileUri);
     if (!material || !match) return res.status(400).json({ error: 'That file could not be read. Please upload it again.' });
     try {
-      const extracted = await extractMaterialText({
+      const extracted = await extractMaterialForUser({
         id: match[1],
         file_name: material.file_name,
       }, req.user.user_id);
@@ -665,7 +570,7 @@ app.post('/api/billing/checkout', requireUser, async (req, res) => {
 if (production) {
   const dist = path.resolve(process.cwd(), 'dist');
   app.use(express.static(dist));
-  app.get('*', (_req, res) => res.sendFile(path.join(dist, 'index.html')));
+  app.get('/{*path}', (_req, res) => res.sendFile(path.join(dist, 'index.html')));
 }
 
 app.use((error, _req, res, _next) => {

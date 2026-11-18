@@ -69,16 +69,13 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = (shouldRedirect = true) => {
+  const logout = async (shouldRedirect = true) => {
+    await nurselog.auth.logout();
     setUser(null);
     setIsAuthenticated(false);
 
     if (shouldRedirect) {
-      // Use the SDK's logout method which handles token cleanup and redirect
-      nurselog.auth.logout(window.location.href);
-    } else {
-      // Just remove the token without redirect
-      nurselog.auth.logout();
+      window.location.assign('/login');
     }
   };
 

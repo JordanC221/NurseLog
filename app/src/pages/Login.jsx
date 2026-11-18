@@ -32,10 +32,6 @@ export default function Login() {
     }
   };
 
-  const handleGoogle = () => {
-    nurselog.auth.loginWithProvider("google", returnTo);
-  };
-
   return (
     <AuthLayout
       icon={LogIn}
@@ -56,11 +52,14 @@ export default function Login() {
       <Button
         variant="outline"
         className="w-full h-12 text-sm font-medium mb-6"
-        onClick={handleGoogle}
+        disabled
       >
         <GoogleIcon className="w-5 h-5 mr-2" />
         Continue with Google
       </Button>
+      <p className="mb-6 -mt-4 text-center text-xs text-muted-foreground">
+        Google sign-in is not configured for this independent version.
+      </p>
 
       <div className="relative mb-6">
         <div className="absolute inset-0 flex items-center">

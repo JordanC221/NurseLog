@@ -46,7 +46,7 @@ export const nurselog = {
       return payload;
     },
     loginWithProvider: () => Promise.reject(new Error('External OAuth is not configured. Use email and password.')),
-    logout: () => api('/api/auth/logout', { method: 'POST', body: '{}' }).catch(() => undefined),
+    logout: () => api('/api/auth/logout', { method: 'POST', body: '{}' }),
     setToken: () => undefined,
     redirectToLogin: () => { window.location.assign('/login'); },
     resetPasswordRequest: (email) => api('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),

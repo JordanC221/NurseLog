@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { UserPlus, Mail, Lock, Loader2 } from "lucide-react";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import AuthLayout from "@/components/AuthLayout";
 import GoogleIcon from "@/components/GoogleIcon";
 import { toast } from "@/components/ui/use-toast";
@@ -17,7 +16,7 @@ export default function Register() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showOtp, setShowOtp] = useState(false);
-  const [otpCode, setOtpCode] = useState("");
+  const [verificationToken, setVerificationToken] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -28,7 +27,8 @@ export default function Register() {
     }
     setLoading(true);
     try {
-      await nurselog.auth.register({ email, password });
+      const result = await nurselog.auth.register({ email, password });
+      setVerificationToken(result.development_verification_token || "");
       setShowOtp(true);
     } catch (err) {
       setError(err.message || "Registration failed");
@@ -41,7 +41,7 @@ export default function Register() {
     setError("");
     setLoading(true);
     try {
-      const result = await nurselog.auth.verifyOtp({ email, otpCode });
+      const result = await nurselog.auth.verifyOtp({ email, otpCode: verificationToken });
       if (result?.access_token) {
         nurselog.auth.setToken(result.access_token);
       }
@@ -56,18 +56,17 @@ export default function Register() {
   const handleResend = async () => {
     setError("");
     try {
-      await nurselog.auth.resendOtp(email);
+      const result = await nurselog.auth.resendOtp(email);
+      if (result.development_verification_token) {
+        setVerificationToken(result.development_verification_token);
+      }
       toast({
-        title: "Code sent",
-        description: "Check your email for the new code.",
+        title: "Local verification token generated",
+        description: "No email was sent. Use the token shown on this page.",
       });
     } catch (err) {
       setError(err.message || "Failed to resend code");
     }
-  };
-
-  const handleGoogle = () => {
-    nurselog.auth.loginWithProvider("google", "/");
   };
 
   if (showOtp) {
@@ -75,35 +74,43 @@ export default function Register() {
       <AuthLayout
         icon={Mail}
         title="Verify your email"
-        subtitle={`We sent a code to ${email}`}
+        subtitle={`Complete email verification for ${email}`}
       >
+        {verificationToken && (
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            Local development only: no email was sent. Use this test verification token:
+            <code className="mt-2 block break-all font-mono" data-testid="development-verification-token">
+              {verificationToken}
+            </code>
+          </div>
+        )}
+        {!verificationToken && (
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            Email delivery is not configured. You can sign in now; verification cannot be completed until an email provider is configured.
+          </div>
+        )}
         {error && (
           <div className="mb-4 p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
             {error}
           </div>
         )}
-        <div className="flex justify-center mb-6">
-          <InputOTP
-            maxLength={6}
-            value={otpCode}
-            onChange={setOtpCode}
-            autoFocus
-            autoComplete="one-time-code"
-          >
-            <InputOTPGroup>
-              <InputOTPSlot index={0} />
-              <InputOTPSlot index={1} />
-              <InputOTPSlot index={2} />
-              <InputOTPSlot index={3} />
-              <InputOTPSlot index={4} />
-              <InputOTPSlot index={5} />
-            </InputOTPGroup>
-          </InputOTP>
-        </div>
+        {verificationToken ? (
+          <div className="mb-6 space-y-2">
+            <Label htmlFor="verification-token">Verification token</Label>
+            <Input
+              id="verification-token"
+              autoComplete="off"
+              value={verificationToken}
+              onChange={(e) => setVerificationToken(e.target.value)}
+              className="h-12 font-mono"
+              required
+            />
+          </div>
+        ) : null}
         <Button
           className="w-full h-12 font-medium"
           onClick={handleVerify}
-          disabled={loading || otpCode.length < 6}
+          disabled={loading || !verificationToken}
         >
           {loading ? (
             <>
@@ -114,12 +121,14 @@ export default function Register() {
             "Verify"
           )}
         </Button>
-        <p className="text-center text-sm text-muted-foreground mt-4">
-          Didn't receive the code?{" "}
-          <button onClick={handleResend} className="text-primary font-medium hover:underline">
-            Resend
-          </button>
-        </p>
+        {verificationToken && (
+          <p className="text-center text-sm text-muted-foreground mt-4">
+            Need a new local token?{" "}
+            <button onClick={handleResend} className="text-primary font-medium hover:underline">
+              Generate one
+            </button>
+          </p>
+        )}
       </AuthLayout>
     );
   }
@@ -144,11 +153,14 @@ export default function Register() {
       <Button
         variant="outline"
         className="w-full h-12 text-sm font-medium mb-6"
-        onClick={handleGoogle}
+        disabled
       >
         <GoogleIcon className="w-5 h-5 mr-2" />
         Continue with Google
       </Button>
+      <p className="mb-6 -mt-4 text-center text-xs text-muted-foreground">
+        Google sign-in is not configured for this independent version.
+      </p>
 
       <div className="relative mb-6">
         <div className="absolute inset-0 flex items-center">

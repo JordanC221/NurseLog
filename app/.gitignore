@@ -14,10 +14,14 @@ lerna-debug.log*
 
 node_modules
 dist
+dev-dist
 dist-ssr
 data
 app-storage
+app-storage-review
+app-storage-review-codespace
 *.local
+test-results
 
 # Editor directories and files
 .vscode/*

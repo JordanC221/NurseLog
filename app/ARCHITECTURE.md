@@ -2,7 +2,7 @@
 
 ## Selected architecture
 
-The product keeps the existing React/Vite interface and adds a Node.js/Express API. Development uses SQLite and local private-file storage. Production should use PostgreSQL and S3-compatible storage rather than the development substitutes.
+The product keeps the existing React/Vite interface and adds a Node.js/Express API. Development uses SQLite and local private-file storage. A single-instance deployment can also use SQLite and a durable private disk; PostgreSQL and S3-compatible storage are optional scaling choices, not prerequisites.
 
 ## Separation
 
@@ -21,7 +21,7 @@ Every entity record and file belongs to a `user_id`. Authorization is checked in
 
 ## Tradeoffs
 
-SQLite/local storage is repeatable for development but not sufficient for multi-instance production. PostgreSQL and private object storage provide concurrency, backups, and independent hosting.
+SQLite/local storage supports a single application instance on a durable disk but not shared multi-instance production. PostgreSQL and private object storage are alternatives when scaling or managed storage is required.
 
 ## Storage implementations
 

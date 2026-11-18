@@ -6,9 +6,12 @@ import { getEffectiveRotations } from "@/lib/clinical";
 import { Shield, Trash2, Save, Sun, Moon, Monitor } from "lucide-react";
 import { useTheme } from "@/lib/ThemeContext";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/lib/AuthContext";
+import { queryClientInstance } from "@/lib/query-client";
 
 export default function Settings() {
   const navigate = useNavigate();
+  const { logout } = useAuth();
   const { settings, saveSettings, loading } = useSettings();
   const { reload } = useClinicalData();
   const { preference, setTheme } = useTheme();
@@ -16,6 +19,18 @@ export default function Settings() {
   const [newRotation, setNewRotation] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+
+  async function signOut() {
+    setLogoutError("");
+    try {
+      await logout(false);
+      queryClientInstance.clear();
+      navigate("/login", { replace: true });
+    } catch (error) {
+      setLogoutError(error.message || "Could not log out. Please try again.");
+    }
+  }
 
   useEffect(() => {
     if (settings && !form) {
@@ -245,6 +260,16 @@ export default function Settings() {
           className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-slate-50 text-slate-700 font-semibold"
         >
           <Shield size={18} /> Two-factor authentication
+        </button>
+      </Section>
+
+      <Section title="Account">
+        {logoutError && <p className="text-sm text-rose-600">{logoutError}</p>}
+        <button
+          onClick={signOut}
+          className="w-full py-3 rounded-xl bg-slate-100 text-slate-700 font-semibold"
+        >
+          Log out
         </button>
       </Section>
 

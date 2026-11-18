@@ -2,7 +2,7 @@
 
 This guide is for a beginner setting up the local NurseLog app.
 
-## What runs locally
+## What runs independently today
 
 - The React interface runs on Vite.
 - The API runs on Node.js and Express.
@@ -49,6 +49,19 @@ Open `http://localhost:3001/api/health`. It should report `"status":"ok"` and `"
 - AI unavailable: provider configuration is intentionally missing.
 - Billing unavailable: leave Stripe unset or configure test-only values.
 
+## Preview location
+
+The preview started from this coding environment is not running directly on your Windows computer. It is available in this Codespaces environment at `http://localhost:5173` if the environment exposes its port to you. The API is `http://localhost:3001`.
+
+On your own Windows computer, use the existing scripts:
+
+1. Install Node.js 20 or newer.
+2. Open PowerShell.
+3. Run `cd C:\path\to\NurseLog\app`.
+4. Run `.\scripts\setup.ps1` if dependencies have not been installed.
+5. Run `.\scripts\start.ps1`.
+6. Open `http://localhost:5173`.
+
 ## Accounts needed later
 
 - Application hosting account
@@ -59,3 +72,31 @@ Open `http://localhost:3001/api/health`. It should report `"status":"ok"` and `"
 - Optional Stripe account in test mode
 
 No service is purchased or configured automatically.
+
+## AI, material, and payment adapters
+
+- **AI:** real HTTP integration exists for an OpenAI-compatible chat-completions endpoint. Set `OPENAI_API_KEY`, `AI_MODEL`, and optionally `AI_BASE_URL`. Without a key, study/case generation returns HTTP 503 and does not create generated records or usage.
+- **Study material extraction:** PDF text, DOCX text, PPTX slide text, TXT/MD/CSV are extracted by the independent server. Scanned/image-only PDFs and photos are not OCR'd; generation is rejected rather than invented. Unsupported formats are reported.
+- **Stripe:** a real checkout and signed-webhook adapter exists only when Stripe environment variables are set. Without them, checkout and webhook operations are unavailable. There is no simulated payment success. Test checkout requires Stripe test keys, price ID, webhook secret, and end-to-end webhook testing.
+- **Email:** verification and password-reset links are development-console tokens only. Production email delivery is not implemented.
+
+## Fidelity review needed
+
+The original ZIP/source has not been found in this repository. Restore the ZIP or extracted source before feature-by-feature visual comparison. Do not use build success or this inventory as proof that original behavior matches.
+
+## Verification status
+
+Passed automated server checks: health, registration, cross-account record isolation, signed skill immutability, one-active timer, overlap rejection, logout invalidation, private file isolation, and unavailable AI/Stripe responses.
+
+Untested: browser registration/login flows, timer after restart, signature UI restrictions, material upload in a browser, real provider generation, answer/progress persistence, PWA installation, and cross-account browser isolation.
+
+## Computer and smartphone comparison checklist
+
+- Use fictional data only.
+- Confirm desktop: route names, sidebar, dashboard, colors, typography, buttons, dialogs, calendar/schedule, reports, and study screens.
+- Confirm mobile: navigation, page widths, forms, dialogs, timer controls, signature pad, uploads, and text wrapping.
+- Compare login, registration, forgot/reset, account settings, logout, and MFA.
+- Create/edit/delete a skill, start/stop a timer, enter clinical hours, sign a record, and try editing/deleting it.
+- Upload a text/PDF-style sample, generate study material if configured, answer flashcards/exam/case questions, and restart to confirm persistence.
+- Log out, log in as a second fictional account, and confirm no record/file appears.
+- Record findings for each original screen and mark preserved, intentionally changed, incomplete, missing, or untested.

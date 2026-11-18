@@ -83,7 +83,8 @@ export function useStudySession({ mode, setId, userId }) {
       { response_id: item.response_id },
       { limit: 1 }
     );
-    if (existing.items.length > 0) return;
+    const existingItems = Array.isArray(existing) ? existing : existing?.items;
+    if (existingItems?.length > 0) return;
     await nurselog.entities.StudyResponse.create(item);
   }, []);
 

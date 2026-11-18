@@ -24,7 +24,10 @@ function entity(name) {
     create: (body) => api(`/api/entities/${name}`, { method: 'POST', body: JSON.stringify(body) }),
     update: (id, body) => api(`/api/entities/${name}/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
     delete: (id) => api(`/api/entities/${name}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    filter: (body) => api(`/api/entities/${name}/filter`, { method: 'POST', body: JSON.stringify(body) }),
+    filter: (body, options = {}) => api(`/api/entities/${name}/filter`, {
+      method: 'POST',
+      body: JSON.stringify({ ...body, ...options }),
+    }),
     bulkCreate: (items) => api(`/api/entities/${name}/bulk`, { method: 'POST', body: JSON.stringify({ items }) }),
     deleteMany: (body = {}) => api(`/api/entities/${name}/delete-many`, { method: 'POST', body: JSON.stringify(body) }),
     count: (body = {}) => api(`/api/entities/${name}/count`, { method: 'POST', body: JSON.stringify(body) }),
@@ -38,8 +41,8 @@ export const nurselog = {
     register: ({ email, password, name }) => api('/api/auth/register', { method: 'POST', body: JSON.stringify({ email, password, name }) }),
     verifyOtp: ({ email, otpCode }) => api('/api/auth/verify-email', { method: 'POST', body: JSON.stringify({ token: otpCode }) }),
     resendOtp: (email) => api('/api/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) }),
-    loginViaEmailPassword: async (email, password) => {
-      const payload = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    loginViaEmailPassword: async (email, password, mfaCode) => {
+      const payload = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password, mfa_code: mfaCode }) });
       return payload;
     },
     loginWithProvider: () => Promise.reject(new Error('External OAuth is not configured. Use email and password.')),
@@ -48,6 +51,9 @@ export const nurselog = {
     redirectToLogin: () => { window.location.assign('/login'); },
     resetPasswordRequest: (email) => api('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
     resetPassword: ({ resetToken, newPassword }) => api('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ token: resetToken, password: newPassword }) }),
+    mfaSetup: () => api('/api/auth/mfa/setup', { method: 'POST', body: '{}' }),
+    mfaEnable: (code) => api('/api/auth/mfa/enable', { method: 'POST', body: JSON.stringify({ code }) }),
+    mfaDisable: () => api('/api/auth/mfa/disable', { method: 'POST', body: '{}' }),
   },
   entities: Object.fromEntries([
     'SkillLog','HoursSession','SkillRequirement','AppSettings','StudySet','Flashcard','ExamQuestion',

@@ -11,6 +11,8 @@ import GoogleIcon from "@/components/GoogleIcon";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const returnTo = "/";
@@ -20,9 +22,10 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      await nurselog.auth.loginViaEmailPassword(email, password);
+      await nurselog.auth.loginViaEmailPassword(email, password, mfaCode);
       window.location.href = returnTo;
     } catch (err) {
+      if (err.data?.mfa_required) setMfaRequired(true);
       setError(err.message || "Invalid email or password");
     } finally {
       setLoading(false);
@@ -113,6 +116,21 @@ export default function Login() {
             />
           </div>
         </div>
+        {mfaRequired && (
+          <div className="space-y-2">
+            <Label htmlFor="mfa-code">Authenticator code</Label>
+            <Input
+              id="mfa-code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="6-digit code"
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              className="h-12"
+              required
+            />
+          </div>
+        )}
         <Button type="submit" className="w-full h-12 font-medium" disabled={loading}>
           {loading ? (
             <>

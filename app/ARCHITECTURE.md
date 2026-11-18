@@ -22,3 +22,11 @@ Every entity record and file belongs to a `user_id`. Authorization is checked in
 ## Tradeoffs
 
 SQLite/local storage is repeatable for development but not sufficient for multi-instance production. PostgreSQL and private object storage provide concurrency, backups, and independent hosting.
+
+## Storage implementations
+
+PostgreSQL is **not implemented**. The current code imports SQLite via `better-sqlite3` and executes a SQLite migration; selecting PostgreSQL would require a database adapter, SQL/JSON/transaction changes, migration tooling, and deployment configuration.
+
+S3-compatible storage is **not implemented**. Upload/download routes read and write `app-storage/` using the local filesystem; moving this to S3 would require new upload/download adapters, presigned or proxy access design, metadata compatibility, and backup changes.
+
+The current practical deployment scope is a single Node process, one local disk, and one SQLite file. It supports account sessions and private local files, but not horizontal scaling, managed failover, or independent database/object-store backups. Files and database must be backed up together.

@@ -31,6 +31,7 @@ import CaseStudyDetail from '@/pages/CaseStudyDetail';
 import Schedule from '@/pages/Schedule';
 import Checklist from '@/pages/Checklist';
 import { Navigate } from 'react-router-dom';
+import Mfa from '@/pages/Mfa';
 // Add page imports here
 
 const AuthenticatedApp = () => {
@@ -73,6 +74,7 @@ const AuthenticatedApp = () => {
           <Route path="/reports" element={<Reports />} />
           <Route path="/history" element={<History />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/mfa" element={<Mfa />} />
           <Route path="/study" element={<Study />} />
           <Route path="/study/flashcards" element={<StudyFlashcards />} />
           <Route path="/study/exam" element={<StudyExam />} />

@@ -5,8 +5,10 @@ import { nurselog } from "@/api/client";
 import { getEffectiveRotations } from "@/lib/clinical";
 import { Shield, Trash2, Save, Sun, Moon, Monitor } from "lucide-react";
 import { useTheme } from "@/lib/ThemeContext";
+import { useNavigate } from "react-router-dom";
 
 export default function Settings() {
+  const navigate = useNavigate();
   const { settings, saveSettings, loading } = useSettings();
   const { reload } = useClinicalData();
   const { preference, setTheme } = useTheme();
@@ -235,6 +237,15 @@ export default function Settings() {
             only. Signed entries are locked and cannot be edited.
           </p>
         </div>
+      </Section>
+
+      <Section title="Security">
+        <button
+          onClick={() => navigate("/mfa")}
+          className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-slate-50 text-slate-700 font-semibold"
+        >
+          <Shield size={18} /> Two-factor authentication
+        </button>
       </Section>
 
       <Section title="Data">

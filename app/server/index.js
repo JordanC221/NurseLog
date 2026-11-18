@@ -7,9 +7,11 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import Stripe from 'stripe';
 import { authenticator } from 'otplib';
+import { PDFParse } from 'pdf-parse';
 import { db } from './db.js';
 import './migrate.js';
 
@@ -379,12 +381,22 @@ app.post('/api/entities/:entity/aggregate', (req, res) => {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 20 * 1024 * 1024, files: 1 },
 });
 
 app.post('/api/files/upload', requireUser, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
-  const allowed = ['application/pdf','image/png','image/jpeg','image/webp','text/plain','text/markdown','text/csv','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.presentationml.presentation'];
+  const allowed = [
+    'application/pdf',
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'text/plain',
+    'text/markdown',
+    'text/csv',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  ];
   if (!allowed.includes(req.file.mimetype)) return res.status(415).json({ error: 'Unsupported file type.' });
   const fileId = id('fil_');
   const safeName = `${fileId}-${crypto.randomBytes(6).toString('hex')}`;
@@ -408,6 +420,110 @@ app.get('/api/files/:fileId', requireUser, (req, res) => {
   res.sendFile(fullPath);
 });
 
+function u16(buf, offset) {
+  return buf.readUInt16LE(offset);
+}
+
+function u32(buf, offset) {
+  return buf.readUInt32LE(offset);
+}
+
+function readOfficeZipEntries(buffer, match) {
+  let eocd = -1;
+  const min = Math.max(0, buffer.length - 66000);
+  for (let i = buffer.length - 22; i >= min; i--) {
+    if (buffer[i] === 0x50 && buffer[i + 1] === 0x4b && buffer[i + 2] === 0x05 && buffer[i + 3] === 0x06) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) return [];
+
+  const count = u16(buffer, eocd + 10);
+  let position = u32(buffer, eocd + 16);
+  const entries = [];
+  for (let i = 0; i < count && position + 46 <= buffer.length; i++) {
+    if (u32(buffer, position) !== 0x02014b50) break;
+    const method = u16(buffer, position + 10);
+    const compressedSize = u32(buffer, position + 20);
+    const nameLength = u16(buffer, position + 28);
+    const extraLength = u16(buffer, position + 30);
+    const commentLength = u16(buffer, position + 32);
+    const localOffset = u32(buffer, position + 42);
+    const name = buffer.subarray(position + 46, position + 46 + nameLength).toString('utf8');
+    if (match(name) && localOffset + 30 <= buffer.length) {
+      const localNameLength = u16(buffer, localOffset + 26);
+      const localExtraLength = u16(buffer, localOffset + 28);
+      const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+      const compressed = buffer.subarray(dataStart, dataStart + compressedSize);
+      try {
+        const content = method === 0 ? compressed : zlib.inflateRawSync(compressed);
+        entries.push({ name, content: content.toString('utf8') });
+      } catch {
+        entries.push({ name, content: '' });
+      }
+    }
+    position += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
+function xmlToText(xml) {
+  return String(xml || '')
+    .replace(/<a:br[^>]*\/>/g, ' ')
+    .replace(/<\/a:p>|<\/w:p>/g, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+}
+
+async function extractMaterialText(file, userId) {
+  const row = db.prepare('SELECT * FROM files WHERE id=? AND user_id=?').get(file.id, userId);
+  if (!row) throw Object.assign(new Error('That file could not be opened. Please upload it again.'), { status: 400 });
+  const fullPath = path.join(storageDir, row.storage_key);
+  if (!fs.existsSync(fullPath)) throw Object.assign(new Error('That stored file is missing. Please upload it again.'), { status: 400 });
+  const buffer = fs.readFileSync(fullPath);
+  const name = String(file.file_name || row.original_name || '').toLowerCase();
+  const ext = name.includes('.') ? name.split('.').pop() : '';
+
+  if (['txt', 'md', 'csv'].includes(ext)) {
+    return buffer.toString('utf8').slice(0, 40000);
+  }
+  if (ext === 'docx') {
+    const entries = readOfficeZipEntries(buffer, (entryName) => entryName === 'word/document.xml');
+    return entries.map((entry) => xmlToText(entry.content)).join('\n\n').slice(0, 40000);
+  }
+  if (ext === 'pptx') {
+    const entries = readOfficeZipEntries(buffer, (entryName) => /^ppt\/slides\/slide\d+\.xml$/.test(entryName));
+    entries.sort((a, b) => {
+      const aNumber = Number(a.name.match(/slide(\d+)\.xml$/)?.[1] || 0);
+      const bNumber = Number(b.name.match(/slide(\d+)\.xml$/)?.[1] || 0);
+      return aNumber - bNumber;
+    });
+    return entries.map((entry, index) => `Slide ${index + 1}: ${xmlToText(entry.content)}`).join('\n\n').slice(0, 40000);
+  }
+  if (ext === 'pdf') {
+    const parser = new PDFParse({ data: buffer });
+    try {
+      const result = await parser.getText();
+      return String(result.text || '').slice(0, 40000);
+    } finally {
+      await parser.destroy();
+    }
+  }
+  if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+    throw Object.assign(new Error('Photo text extraction is not supported in this independent version. Upload a PDF, Word document, PowerPoint, or text file instead.'), { status: 422 });
+  }
+  throw Object.assign(new Error('Unsupported file type.'), { status: 400 });
+}
+
 function remainingGenerationLimit(userId) {
   const row = db.prepare('SELECT plan FROM users WHERE id=?').get(userId);
   const limit = row?.plan === 'paid-study' ? 100 : 10;
@@ -422,7 +538,8 @@ async function invokeAI(prompt, schema) {
   if (!process.env.OPENAI_API_KEY) {
     return null;
   }
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const baseUrl = (process.env.AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -446,16 +563,53 @@ app.post('/api/functions/generateStudySet', requireUser, async (req, res) => {
   const usage = remainingGenerationLimit(req.user.user_id);
   if (usage.remaining <= 0) return res.status(429).json({ error: 'Monthly study-generation limit reached.' });
   const topic = String(req.body.topic || 'Nursing Fundamentals').slice(0, 120);
+  let focus;
+  if (req.body.mode === 'material') {
+    const material = req.body.material && typeof req.body.material === 'object' ? req.body.material : null;
+    const fileUri = String(material?.file_uri || '').trim();
+    const match = /^\/api\/files\/([^/?]+)$/.exec(fileUri);
+    if (!material || !match) return res.status(400).json({ error: 'That file could not be read. Please upload it again.' });
+    try {
+      const extracted = await extractMaterialText({
+        id: match[1],
+        file_name: material.file_name,
+      }, req.user.user_id);
+      if (!extracted.trim() || extracted.trim().length < 20) {
+        return res.status(422).json({ error: 'No readable text was found in that file. If it is scanned or image-only, export it as a searchable PDF and upload again.' });
+      }
+      focus = `Below is text extracted from course material titled "${String(material.title || 'Uploaded course material').slice(0, 120)}".\n\n=== COURSE MATERIAL START ===\n${extracted}\n=== COURSE MATERIAL END ===\n\nBase the study material on concepts and facts present in this text. Do not invent unsupported content.`;
+    } catch (error) {
+      return res.status(error.status || 500).json({ error: error.message || 'That file could not be extracted.' });
+    }
+  } else if (req.body.mode === 'log') {
+    const items = Array.isArray(req.body.items) ? req.body.items.slice(0, 25) : [];
+    const lines = items.map((item) => {
+      const name = String(item.skill_name || '').trim();
+      if (!name) return null;
+      const category = String(item.skill_category || '').trim();
+      const rotation = String(item.rotation_type || '').trim();
+      const notes = String(item.notes || '').trim();
+      return `- ${name}${category ? ` (${category})` : ''}${rotation ? ` [${rotation} rotation]` : ''}${notes ? ` notes: ${notes}` : ''}`;
+    }).filter(Boolean);
+    if (!lines.length) return res.status(400).json({ error: 'No clinical skills logged yet. Log a skill first, or study a topic instead.' });
+    focus = `A nursing student recently performed these clinical skills:\n${lines.join('\n')}\n\nBuild study material that reinforces rationale, key steps, safety checks, expected findings, and complications.`;
+  } else {
+    if (!topic.trim()) return res.status(400).json({ error: 'Please choose or enter a topic to study.' });
+    focus = `Build study material on this nursing topic: "${topic}". Cover concepts a nursing student needs for clinical practice and exams.`;
+  }
   const schema = {
     title: 'string', description: 'string', summary: 'string', topics: ['string'],
     cards: [{ front: 'string', back: 'string', topic: 'string' }],
     questions: [{ question: 'string', options: ['string'], correct_index: 0, explanation: 'string', difficulty: 'easy|medium|hard', topic: 'string' }],
   };
-  const prompt = `Create exactly 12 flashcards and 8 multiple-choice nursing questions about: ${topic}. Use fictional educational content.`;
+  const prompt = `You are an experienced nursing educator creating exam-focused study material.\n\n${focus}\n\nRequirements:\n- Produce exactly 12 flashcards.\n- Produce exactly 8 multiple-choice questions, each with exactly 4 options and exactly one correct answer.\n- Vary difficulty across questions: roughly 3 easy, 3 medium, 2 hard.\n- Keep content accurate and clinically sound.\n- Never include real patient identifiers or unsupported source citations.\n- For material-generated sets, use only facts present in the extracted source text.`;
   try {
     const generated = await invokeAI(prompt, schema);
     if (!generated) return res.status(503).json({ error: 'AI generation is unavailable until an AI provider is configured.' });
-    if (!Array.isArray(generated.cards) || !Array.isArray(generated.questions)) {
+    if (!Array.isArray(generated.cards) || generated.cards.length !== 12 ||
+        !Array.isArray(generated.questions) || generated.questions.length !== 8 ||
+        generated.questions.some((question) => !Array.isArray(question.options) || question.options.length !== 4 ||
+          !Number.isInteger(question.correct_index) || question.correct_index < 0 || question.correct_index > 3)) {
       return res.status(502).json({ error: 'The AI provider returned an invalid study set.' });
     }
     db.prepare('INSERT INTO generation_usage(user_id,kind) VALUES(?,\'study-set\')').run(req.user.user_id);
